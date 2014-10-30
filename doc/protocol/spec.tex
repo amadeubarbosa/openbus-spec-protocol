@@ -270,6 +270,13 @@ O identificador do barramento é obtido através do atributo \code{busid} da \term
 \label{sub:validacao_da_personalidade}
 
 Ao receber uma chamada com uma credencial, é necessário validar a autenticidade dessa credencial.
+Caso não seja possível recuperar nenhuma informação de credencial, a chamada deve ser recusada com a exceção de sistema \code{CORBA::NO\_PERMISSION} com \code{COMPLETED\_NO} e o \term{minor code} dado pela seguinte constante:
+
+\begin{samplecode}[language={[CORBA]idl}]
+// File: access_control.idl
+// Name: ::tecgraf::NoCredentialCode;
+\end{samplecode}
+
 Caso a credencial indique um identificador de barramento (campo \code{bus}) desconhecido, a chamada deve ser recusada com a exceção de sistema \code{CORBA::NO\_PERMISSION} com \code{COMPLETED\_NO} e o \term{minor code} dado pela seguinte constante:
 
 \begin{samplecode}[language={[CORBA]idl}]
@@ -317,14 +324,14 @@ Os dados do \term{service context} consitem da seguinte estrutura deve codificad
 // File: credential.idl
 // Name: tecgraf::openbus::core::v2_0::credential::CredentialReset
 struct CredentialReset {
-	Identifier target;        // callee entity
+	Identifier target;        // callee login id
 	unsigned long session;    // session ID
 	EncryptedBlock challenge; // encrypted 16-byte random value (the secret)
 };
 \end{samplecode}
 
 \begin{description}
-	\item[Campo \code{target}] contém o nome da entidade que recebeu a chamada.
+	\item[Campo \code{target}] contém o identificador de login da entidade que recebeu a chamada.
 	\item[Campo \code{session}] contém um novo identificador da sessão de geração de credenciais correspondente ao segredo fornecido no campo \code{challenge}.
 	O identificador de sessão gerado deve ser diferente de qualquer sessão de geração de credenciais ativa entre o recebedor da chamada e o iniciador da chamada.
 	\item[Campo \code{challenge}] contém um novo segredo encriptado com a chave pública de acesso associada ao login que iniciou a chamada.
@@ -448,6 +455,157 @@ Note que dessa forma é possível se adicionar a cadeias recebidas (processo denom
 % subsection cadeia_de_chamadas (end)
 
 % section credenciais_de_chamada (end)
+
+\section{Pseudo-Código}
+
+A seguir descrevemos um pseudo-código exemplo de implementação desta especificação de protocolo, de acordo com os pontos de inteceptação disponíveis pela especificação de CORBA.
+
+\subsection{Interceptador Servidor}
+
+\subsubsection{receive\_request}
+
+\begin{numberedcode}[language={lua}]
+CredentialData = retrieveCredentialFromContext()
+if CredentialData == nil then NO_PERMISSION{minor=NoCredential} end
+conn = onCallDispatch() or defaultConnectiion()
+if conn == null or conn.login == null or conn.busId != busId then 
+  NO_PERMISSION{minor=UnknownBus}
+end
+
+valid = validateLogin(ClientLogin) -- use cache.logins
+if NO_PERMISSION then
+  if minor == NoLogin then
+    NO_PERMISSION{minor=UnknownBus}
+  else
+    NO_PERMISSION{minor=UnverifiedLogin}
+  end
+if Exception then NO_PERMISSION{minor=UnverifiedLogin} end
+if not valid then NO_PERMISSION{minor=InvalidLogin} end
+
+entity = getLoginInfo(ClientLogin) -- use cache.logins
+if InvalidLogins then NO_PERMISSION{minor=InvalidLogin} end
+if ServiceFailure then NO_PERMISSION{minor=UnverifiedLogin} end
+if NO_PERMISSION then
+  if minor == NoLogin then
+    NO_PERMISSION{minor=UnknownBus}
+  else 
+    NO_PERMISSION{minor=UnverifiedLogin}
+  end
+end
+if Exception then NO_PERMISSION{minor=UnverifiedLogin} end
+
+valid = validateCredential()
+if valid then goto 8 end
+if CryptoException then NO_PERMISSION{minor=InvalidPublicKey} end
+saveToContext(CredentialReset{ServerLogin, SessionId, Challenge})
+NO_PERMISSION{minor=InvalidCredential}
+
+8: valid = validateChain()
+if chain.caller.id != credential.login then
+  NO_PERMISSION{minor=InvalidCredential}
+end
+if not valid then NO_PERMISSION{minor=InvalidChain} end
+
+-- Request received!
+
+\end{numberedcode}
+
+% subsubsection receive_request (end)
+
+% subsection server_interceptor (end)
+
+\subsection{Interceptador Cliente}
+
+\subsubsection{send\_request}
+
+\begin{numberedcode}[language={lua}]
+-- some cases (ex: login) we don't need to send credential
+if not insertCredentialToCall() then return end
+
+if conn.login() == nil then NO_PERMISSION{minor=NoLogin} end
+incache = cache.EffectiveProfileToEntity.get(ri.effective_profile())
+if not incache then 
+  goto 3
+else
+  goto 4 -- CredentialReset already received
+end
+
+3: saveToContext( CredentialData{BusId, ClientLogin, NULLs, ...} )
+goto 6
+
+4: session = cache.ClientSessions.get(target) -- target is ServerLogin
+if session == null then goto 3 end
+Hash =  CredentialHash{ version, secret, ticket, operation }
+Chain = cache.SignedChains.get(ClientLogin, ServerLogin, JoinedOrNullChain )
+if Chain ~= nil then goto 5 end
+Chain = signChainFor(ServerLogin) 
+cache.SignedChains.put(Chain)
+if InvalidLogins then NO_PERMISSION{minor=InvalidTarget} end
+CORBAException then NO_PERMISSION{minor=UnavailableBus} end
+if ServiceFailure then INTERNAL end
+
+5: saveToContext( CredentialData{BusId,ClientLogin,
+                    SessionId,Hash,Chain{Client,ServerLogin},...} )
+
+6: save map.RequestId2Conn
+save map.RequestId2Login
+\end{numberedcode}
+
+% subsubsection send_request (end)
+
+\subsubsection{receive\_exception}
+
+\begin{numberedcode}[language={lua}]
+if exception != NO_PERMISSION or completed != COMPLETED_NO then return end
+
+login = map.RequestId2Login
+conn = map.RequestId2Conn
+
+switch(minor)
+  case InvalidCredential:
+    CredentialReset = retrieveCredentialResetFromContext()
+    if CredentialReset == nil then NO_PERMISSION{minor=InvalidRemote} end
+    -- CredentialReset{ServerLogin, SessionId, Challenge}
+    cache.EffectiveProfileToEntity.put(ep, ServerLogin)
+    cache.ClientSessions.put(ServerLogin, {SessionId, secret, ServerLogin})
+    FORWARD_REQUEST()
+    goto 4
+
+  case InvalidLogin:
+    if login == conn.login().id then localLogout() end
+    retryLogin() -- call conn.OnInvalidLoginCallback()
+    if conn.login() == nil then NO_PERMISSION{minor=NoLogin} end
+    FORWARD_REQUEST()
+    goto 4
+
+  case NoCredential:
+    NO_PERMISSION{minor=InvalidRemote}
+    goto 4
+
+  case default:
+    -- do nothing
+    goto 4
+
+end -- switch
+
+4: remove map.RequestId2Conn 
+remove map.RequestId2Login
+\end{numberedcode}
+
+% subsubsection receive_exception (end)
+
+\subsubsection{receive\_reply}
+
+\begin{numberedcode}[language={lua}]
+remove map.RequestId2Conn 
+remove map.RequestId2Login
+\end{numberedcode}
+
+% subsubsection receive_reply (end)
+
+% subsection client_interceptor (end)
+
+% section pseudo_code (end)
 
 \appendix
 

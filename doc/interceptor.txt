@@ -8,16 +8,16 @@
 3. CredentialData{BusId, ClientLogin, NULLs, …}
 3.1. goto 6
 
-4. cache.ClientSessions.get(target) -- target is ServerLogin
+4. session = cache.ClientSessions.get(target) -- target is ServerLogin
 4.1. if session == null then goto 3
 4.2. CredentialHash{ version, secret, ticket, operation }
 4.3. cache.SignedChains.get(ClientLogin, ServerLogin, JoinedOrNullChain )
 4.3.1 if in cache then goto 5
 4.4. Chain = signChainFor(ServerLogin) 
-4.4. cache.SignedChains.put(Chain)
-4.4.1 if InvalidLogins then NO_PERMISSION{minor=InvalidTarget}
-4.4.2 if CORBAException then NO_PERMISSION{minor=UnavailableBus}
-4.4.3 if ServiceFailure then INTERNAL
+4.4.1 cache.SignedChains.put(Chain)
+4.4.2 if InvalidLogins then NO_PERMISSION{minor=InvalidTarget}
+4.4.3 if CORBAException then NO_PERMISSION{minor=UnavailableBus}
+4.4.4 if ServiceFailure then INTERNAL
 
 5. CredentialData{BusId,ClientLogin,SessionId,Hash,Chain{Client,ServerLogin},...}
 

@@ -1,0 +1,92 @@
+[Client] operation() -- send_request
+1. if conn.login() == null then NO_PERMISSION{minor=NoLogin}
+
+2. cache.EffectiveProfileToEntity.get(ri.effective_profile())
+2.1. if not in cache then goto 3
+2.2. if in cache then goto 4 -- CredentialReset already received
+
+3. CredentialData{BusId, ClientLogin, NULLs, …}
+3.1. goto 6
+
+4. cache.ClientSessions.get(target) -- target is ServerLogin
+4.1. if session == null then goto 3
+4.2. CredentialHash{ version, secret, ticket, operation }
+4.3. cache.SignedChains.get(ClientLogin, ServerLogin, JoinedOrNullChain )
+4.3.1 if in cache then goto 5
+4.4. Chain = signChainFor(ServerLogin) 
+4.4. cache.SignedChains.put(Chain)
+4.4.1 if InvalidLogins then NO_PERMISSION{minor=InvalidTarget}
+4.4.2 if CORBAException then NO_PERMISSION{minor=UnavailableBus}
+4.4.3 if ServiceFailure then INTERNAL
+
+5. CredentialData{BusId,ClientLogin,SessionId,Hash,Chain{Client,ServerLogin},...}
+
+6. save map.RequestId2Conn save map.RequestId2Login
+
+[Client] operation() -- receive_exception
+1. if exception != NO_PERMISSION or completed != COMPLETED_NO then return
+2. login = map.RequestId2Login; conn = map.RequestId2Conn
+3. switch(minor)
+
+3.1. case InvalidCredential
+3.1.1. if CredentialReset == null then NO_PERMISSION{minor=InvalidRemote}
+3.1.2. CredentialReset{ServerLogin, SessionId, Challenge}
+3.1.3. cache.EffectiveProfileToEntity.put(ep, ServerLogin)
+3.1.3. cache.ClientSessions.put(ServerLogin, {SessionId, secret, ServerLogin})
+3.1.4. FORWARD_REQUEST()
+3.1.5. goto 4
+
+3.2. case InvalidLogin
+3.2.1. if login == conn.login().id then localLogout()
+3.2.2. retryLogin() -- OnInvalidLoginCallback()
+3.2.3. if conn.login() == null then NO_PERMISSION{minor=NoLogin}
+3.2.4. FORWARD_REQUEST()
+3.2.5. goto 4
+
+3.3. case NoCredential
+3.3.1 NO_PERMISSION{minor=InvalidRemote}
+3.3.2. goto 4
+
+3.4. case default
+3.4.1 do nothing
+3.4.2. goto 4
+
+4. remove map.RequestId2Conn remove map.RequestId2Login
+
+[Client] operation() -- receive_reply
+1. remove map.RequestId2Conn remove map.RequestId2Login
+
+
+[Server] operation() -- receive_request
+1. CredentialData = retrieveCredentialFromContext()
+2. if CredentialData == null then NO_PERMISSION{minor=NoCredential}
+3. conn = onCallDispatch() or defaultConnectiion()
+4. if conn == null or conn.login == null or conn.busId != busId then NO_PERMISSION{minor=UnknownBus}
+
+5. valid = validateLogin(ClientLogin) -- use cache.logins
+5.1. if NO_PERMISSION then
+5.1.1 if minor == NoLogin then NO_PERMISSION{minor=UnknownBus}
+5.1.2 else NO_PERMISSION{minor=UnverifiedLogin}
+5.2. if Exception then NO_PERMISSION{minor=UnverifiedLogin}
+5.3 if not valid then NO_PERMISSION{minor=InvalidLogin}
+
+6. entity = getLoginInfo(ClientLogin) -- use cache.logins
+6.1. if InvalidLogins then NO_PERMISSION{minor=InvalidLogin}
+6.2. if ServiceFailure then NO_PERMISSION{minor=UnverifiedLogin}
+6.3. if NO_PERMISSION then
+6.3.1 if minor == NoLogin then NO_PERMISSION{minor=UnknownBus}
+6.3.2 else NO_PERMISSION{minor=UnverifiedLogin}
+6.4. if Exception then NO_PERMISSION{minor=UnverifiedLogin}
+
+7. valid = validateCredential()
+7.1. if valid then goto 8
+7.2. if CryptoException then NO_PERMISSION{minor=InvalidPublicKey}
+7.2. CredentialReset{ServerLogin, SessionId, Challenge}
+7.2. NO_PERMISSION{minor=InvalidCredential}
+
+8. valid = validateChain()
+8.1. if chain.caller.id != credential.login then NO_PERMISSION{minor=InvalidCredential}
+8.1. if not valid then NO_PERMISSION{minor=InvalidChain}
+
+9. Request received!
+

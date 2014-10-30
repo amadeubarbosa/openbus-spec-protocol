@@ -507,7 +507,6 @@ end
 if not valid then NO_PERMISSION{minor=InvalidChain} end
 
 -- Request received!
-
 \end{numberedcode}
 
 % subsubsection receive_request (end)
@@ -537,11 +536,11 @@ goto 6
 if session == null then goto 3 end
 Hash =  CredentialHash{ version, secret, ticket, operation }
 Chain = cache.SignedChains.get(ClientLogin, ServerLogin, JoinedOrNullChain )
-if Chain ~= nil then goto 5 end
+if not Chain == nil then goto 5 end
 Chain = signChainFor(ServerLogin) 
 cache.SignedChains.put(Chain)
 if InvalidLogins then NO_PERMISSION{minor=InvalidTarget} end
-CORBAException then NO_PERMISSION{minor=UnavailableBus} end
+if CORBAException then NO_PERMISSION{minor=UnavailableBus} end
 if ServiceFailure then INTERNAL end
 
 5: saveToContext( CredentialData{BusId,ClientLogin,

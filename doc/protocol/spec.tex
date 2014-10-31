@@ -539,7 +539,14 @@ Chain = cache.SignedChains.get(ClientLogin, ServerLogin, JoinedOrNullChain )
 if not Chain == nil then goto 5 end
 Chain = signChainFor(ServerLogin) 
 cache.SignedChains.put(Chain)
-if InvalidLogins then NO_PERMISSION{minor=InvalidTarget} end
+if InvalidLogins then 
+  toRemove = {}
+  for ep, id in pairs(cache.EffectiveProfileToEntity) do
+    if id == ServerLogin then toRemove.add(ep) end
+  end
+  cache.EffectiveProfileToEntity.removeAll(toRemove)
+  NO_PERMISSION{minor=InvalidTarget}
+end
 if CORBAException then NO_PERMISSION{minor=UnavailableBus} end
 if ServiceFailure then INTERNAL end
 

@@ -584,10 +584,6 @@ switch(minor)
     FORWARD_REQUEST()
     goto 4
 
-  case NoCredential:
-    NO_PERMISSION{minor=InvalidRemote}
-    goto 4
-
   case NoLogin:
   case UnavailableBus:
   case InvalidTarget:

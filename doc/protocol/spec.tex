@@ -581,6 +581,13 @@ switch(minor)
     NO_PERMISSION{minor=InvalidRemote}
     goto 4
 
+  case NoLogin:
+  case UnavailableBus:
+  case InvalidTarget:
+  case InvalidRemote:
+    NO_PERMISSION{minor=InvalidRemote}
+    goto 4
+
   case default:
     -- do nothing
     goto 4

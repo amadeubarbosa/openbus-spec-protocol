@@ -578,7 +578,29 @@ switch(minor)
     goto 4
 
   case InvalidLogin:
-    if login == conn.login().id then localLogout() end
+    if login == conn.login().id then
+      if not getPICurrent(checkingValiditySlot) then
+        setPICurrent(checkingValiditySlot, true)
+        valid = conn.logins.getValidity(login)
+        if SystemException then
+          NO_PERMISSION{minor=UnavailableBus}
+          goto 4:
+        elseif ServiceFailure then 
+          INTENAL
+          goto 4: 
+        elseif valid then
+          NO_PERMISSION{minor=InvalidRemote}
+          goto 4
+        elseif not valid then
+          -- already reconnected
+          FORWARD_REQUEST()
+          goto 4
+        end
+      else
+        clearPICurrent(checkingValiditySlot)
+        localLogout()
+      end
+    end
     retryLogin() -- call conn.OnInvalidLoginCallback()
     if conn.login() == nil then NO_PERMISSION{minor=NoLogin} end
     FORWARD_REQUEST()
